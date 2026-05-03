@@ -1,299 +1,275 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Dino Game</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dino Quiz - Cụ Phó bảng Nguyễn Sinh Sắc</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Arial, sans-serif; background: #000; touch-action: none; }
+        canvas { display: block; background: #fff; }
 
-<style>
-body{margin:0;overflow:hidden;font-family:Arial;}
-canvas{display:block;}
+        /* Thông báo xoay ngang */
+        @media screen and (orientation: portrait) {
+            #rotate-overlay { display: flex; }
+        }
+        #rotate-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9); color: white; z-index: 1000;
+            flex-direction: column; justify-content: center; align-items: center; text-align: center;
+        }
 
-.menu{
-    position:absolute;
-    top:40%;
-    left:50%;
-    transform:translateX(-50%);
-    background:white;
-    padding:20px;
-    border-radius:10px;
-    text-align:center;
-}
-</style>
+        /* Giao diện Menu */
+        .menu-box {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            background: rgba(255, 255, 255, 0.95); padding: 25px; border-radius: 15px;
+            text-align: center; box-shadow: 0 0 30px rgba(0,0,0,0.5); z-index: 100;
+            width: 80%; max-width: 450px;
+        }
+
+        h2 { color: #2c3e50; margin: 0 0 15px 0; }
+        
+        button {
+            padding: 12px 24px; font-size: 16px; cursor: pointer; margin: 8px;
+            border-radius: 8px; border: none; background: #27ae60; color: white;
+            font-weight: bold; transition: 0.2s;
+        }
+        button:active { transform: scale(0.95); background: #219150; }
+
+        /* Hộp câu hỏi */
+        #questionBox { display: none; text-align: left; }
+        #questionBox button { 
+            width: 100%; text-align: left; background: #f1f1f1; color: #333; 
+            margin-bottom: 8px; padding: 12px; font-weight: normal;
+        }
+        #questionBox button:hover { background: #e0e0e0; }
+    </style>
 </head>
-
 <body>
+
+<div id="rotate-overlay">
+    <h2>📱 Vui lòng xoay ngang điện thoại</h2>
+    <p>Để có trải nghiệm chơi game tốt nhất!</p>
+</div>
 
 <canvas id="gameCanvas"></canvas>
 
-<div id="startMenu" class="menu">
-    <h2>Dino Game</h2>
-    <button onclick="startGame()">Start</button>
+<!-- Menu Bắt đầu -->
+<div id="startMenu" class="menu-box">
+    <h2>Dino Game Quiz</h2>
+    <p>Chủ đề: Cuộc đời cụ Phó bảng Nguyễn Sinh Sắc</p>
+    <button onclick="startGame()">BẮT ĐẦU CHƠI</button>
 </div>
 
-<div id="gameOverMenu" class="menu" style="display:none;">
-    <h2>Game Over</h2>
+<!-- Menu Kết thúc -->
+<div id="gameOverMenu" class="menu-box" style="display:none;">
+    <h2 id="endStatus">KẾT THÚC</h2>
     <p id="finalScore"></p>
-    <button onclick="restart()">Chơi lại</button>
+    <button onclick="restart()">CHƠI LẠI</button>
 </div>
 
-<div id="questionBox" class="menu" style="display:none;"></div>
+<!-- Hộp câu hỏi -->
+<div id="questionBox" class="menu-box"></div>
 
 <script>
 const canvas = document.getElementById("gameCanvas");
 const ctx = canvas.getContext("2d");
 
+// --- CẤU HÌNH HỆ THỐNG ---
+let gameRunning = false;
+let asking = false;
+let score = 0;
+let lives = 3;
 let groundY = 0;
+const groundOffset = 100; 
 
-// ===== RESIZE =====
-function resize(){
+// Nhân vật & Vật lý
+let player = { x: 80, y: 0, w: 70, h: 70, vy: 0, jumping: false };
+const gravity = 0.8; // Trọng lực nhẹ nhàng
+const jumpForce = -18; // Lực nhảy vừa phải
+
+// Tốc độ & Hình ảnh
+const speed = 4; 
+const bgFiles = ["bg1.png", "bg2.png", "bg3.png", "bg4.png", "bg5.png"];
+let bgImages = [];
+let currentBgIdx = 0;
+let bgX = 0;
+let obstacles = [];
+let nextSpawn = 0;
+
+// Load Resource
+function loadImg(src) {
+    let img = new Image();
+    img.src = src;
+    return img;
+}
+const playerImg = loadImg("player.png");
+const spike1Img = loadImg("gai1.jpg");
+const spike2Img = loadImg("gai2.png");
+bgImages = bgFiles.map(src => loadImg(src));
+
+// --- DỮ LIỆU CÂU HỎI ---
+let currentIndex = 0;
+const questions = [
+    {q:"Cụ Phó bảng Nguyễn Sinh Sắc sinh năm nào và quê ở đâu?", options:["1862 – Nghệ An","1863 – Nam Định","1862 – Hà Tĩnh","1863 – Nghệ An"], correct:3},
+    {q:"Thân mẫu của Chủ tịch Hồ Chí Minh là ai?", options:["Hoàng Thị Loan","Nguyễn Thị Thanh","Lê Thị Huệ","Trương Thị Thử"], correct:0},
+    {q:"Năm 1901 cụ đỗ học vị gì?", options:["Tiến sĩ","Phó bảng","Cử nhân","Tú tài"], correct:1},
+    {q:"Cụ từng làm quan gì ở Bình Khê?", options:["Tri phủ","Tri huyện","Đốc học","Thừa phái"], correct:1},
+    {q:"Sau khi từ quan cụ làm gì?", options:["Buôn bán","Dạy học + bốc thuốc","Làm quan tiếp","Đi Pháp"], correct:1},
+    {q:"Cụ mất tại đâu?", options:["Sa Đéc","Cao Lãnh","Lấp Vò","Hồng Ngự"], correct:1},
+    {q:"Ngày mất của cụ?", options:["27/10 AL","26/11 DL","19/5 DL","Cả A và B"], correct:3},
+    {q:"Khu di tích nằm ở đường nào?", options:["Phạm Hữu Lầu","Nguyễn Huệ","Lý Thường Kiệt","Lê Lợi"], correct:0},
+    {q:"Công trình nổi bật nhất?", options:["Tượng đài","Mộ vòm sò","Nhà sàn","Bảo tàng"], correct:1},
+    {q:"Có bao nhiêu con rồng?", options:["5","7","9","11"], correct:2},
+    {q:"Ý nghĩa 9 con rồng?", options:["Danh vọng","Cửu Long","Con cái","Trang trí"], correct:1},
+    {q:"Công trình mô phỏng Hà Nội?", options:["Chùa Một Cột","Lăng Bác","Nhà sàn + ao cá","Văn Miếu"], correct:2},
+    {q:"Xếp hạng quốc gia năm nào?", options:["1975","1992","2000","2010"], correct:1},
+    {q:"Ngày giỗ cụ?", options:["27/10 AL","19/5","2/9","10/3"], correct:0},
+    {q:"Làng Hòa An xưa dùng để làm gì?", options:["Ẩm thực","Tái hiện đời sống","Giải trí","Họp"], correct:1}
+];
+
+// --- LOGIC GAME ---
+function resize() {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
+    groundY = canvas.height - groundOffset;
+    if (!player.jumping) player.y = groundY - player.h;
 }
 window.addEventListener("resize", resize);
 resize();
 
-// ===== ẢNH =====
-const playerImg = new Image(); playerImg.src="player.png";
-const spike1Img = new Image(); spike1Img.src="gai1.jpg";
-const spike2Img = new Image(); spike2Img.src="gai2.png";
-
-// ===== BACKGROUND =====
-const bgList = ["bg1.png","bg2.png","bg3.png","bg4.png","bg5.png","bg6.png","bg7.png"];
-const groundList = [105,105,105,105,105,105,105];
-
-const bgImages = bgList.map(src=>{
-    let img=new Image(); img.src=src; return img;
-});
-
-let bgIndex=0,currentBg=bgImages[0],nextBg=null;
-let bgX=0,bgSpeed=2;
-let fadeAlpha=0,isFading=false;
-
-// ===== PLAYER =====
-let player={x:100,y:0,w:80,h:80,vy:0,jumping:false};
-let gravity=1;
-
-// ===== GAME =====
-let obstacles=[],nextSpawn=0;
-let score=0,lives=3,asking=false,gameRunning=false;
-
-// ===== QUIZ =====
-let currentIndex=0;
-let currentQ=null;
-
-const questions = [
-{q:"Cụ Phó bảng Nguyễn Sinh Sắc sinh năm nào và quê ở đâu?", options:["1862 – Nghệ An","1863 – Nam Định","1862 – Hà Tĩnh","1863 – Nghệ An"], correct:3},
-{q:"Thân mẫu của Chủ tịch Hồ Chí Minh là ai?", options:["Hoàng Thị Loan","Nguyễn Thị Thanh","Lê Thị Huệ","Trương Thị Thử"], correct:0},
-{q:"Năm 1901 cụ đỗ học vị gì?", options:["Tiến sĩ","Phó bảng","Cử nhân","Tú tài"], correct:1},
-{q:"Cụ từng làm quan gì ở Bình Khê?", options:["Tri phủ","Tri huyện","Đốc học","Thừa phái"], correct:1},
-{q:"Sau khi từ quan cụ làm gì?", options:["Buôn bán","Dạy học + bốc thuốc","Làm quan tiếp","Đi Pháp"], correct:1},
-{q:"Cụ mất tại đâu?", options:["Sa Đéc","Cao Lãnh","Lấp Vò","Hồng Ngự"], correct:1},
-{q:"Ngày mất của cụ?", options:["27/10 AL","26/11 DL","19/5 DL","Cả A và B"], correct:3},
-{q:"Khu di tích nằm ở đường nào?", options:["Phạm Hữu Lầu","Nguyễn Huệ","Lý Thường Kiệt","Lê Lợi"], correct:0},
-{q:"Công trình nổi bật nhất?", options:["Tượng đài","Mộ vòm sò","Nhà sàn","Bảo tàng"], correct:1},
-{q:"Có bao nhiêu con rồng?", options:["5","7","9","11"], correct:2},
-{q:"Ý nghĩa 9 con rồng?", options:["Danh vọng","Cửu Long","Con cái","Trang trí"], correct:1},
-{q:"Công trình mô phỏng Hà Nội?", options:["Chùa Một Cột","Lăng Bác","Nhà sàn + ao cá","Văn Miếu"], correct:2},
-{q:"Xếp hạng quốc gia năm nào?", options:["1975","1992","2000","2010"], correct:1},
-{q:"Ngày giỗ cụ?", options:["27/10 AL","19/5","2/9","10/3"], correct:0},
-{q:"Làng Hòa An xưa dùng để làm gì?", options:["Ẩm thực","Tái hiện đời sống","Giải trí","Họp"], correct:1}
-];
-
-// ===== JUMP =====
-function jump(){
-    if(!player.jumping && !asking && gameRunning){
-        player.vy=-20;
-        player.jumping=true;
+function jump() {
+    if (!player.jumping && gameRunning && !asking) {
+        player.vy = jumpForce;
+        player.jumping = true;
     }
 }
 
-document.addEventListener("keydown",e=>{
-    if(e.code==="Space") jump();
-});
-canvas.addEventListener("mousedown",jump);
-canvas.addEventListener("touchstart",e=>{
-    e.preventDefault();
-    jump();
-});
-
-// ===== START =====
-function startGame(){
-    document.getElementById("startMenu").style.display="none";
-
-    bgIndex=0;
-    currentBg=bgImages[0];
-    updateGround();
-
-    player.y=groundY-player.h;
-
-    obstacles=[];
-    score=0;
-    lives=3;
-    nextSpawn=0;
-    currentIndex=0;
-
-    gameRunning=true;
+function startGame() {
+    score = 0; lives = 3; currentIndex = 0; currentBgIdx = 0;
+    obstacles = []; gameRunning = true; asking = false;
+    document.getElementById("startMenu").style.display = "none";
+    document.getElementById("gameOverMenu").style.display = "none";
+    resize();
 }
 
-// ===== RESET =====
-function restart(){
-    document.getElementById("gameOverMenu").style.display="none";
-    startGame();
+function restart() { startGame(); }
+
+function askQuestion() {
+    asking = true;
+    let q = questions[currentIndex];
+    let box = document.getElementById("questionBox");
+    box.innerHTML = `<h3>Câu ${currentIndex + 1}/15</h3><p>${q.q}</p>` + 
+        q.options.map((opt, i) => `<button onclick="handleAnswer(${i})">${opt}</button>`).join("");
+    box.style.display = "block";
 }
 
-// ===== GROUND =====
-function updateGround(){
-    groundY=canvas.height-groundList[bgIndex];
+function handleAnswer(idx) {
+    if (idx !== questions[currentIndex].correct) lives--;
+    currentIndex++;
+    asking = false;
+    document.getElementById("questionBox").style.display = "none";
+    
+    if (lives <= 0) endGame("Bạn đã hết mạng!");
+    else if (currentIndex >= questions.length) endGame("Xuất sắc! Bạn đã hoàn thành 15 câu hỏi!");
 }
 
-// ===== UPDATE =====
-function update(){
-    if(!gameRunning || asking) return;
+function endGame(msg) {
+    gameRunning = false;
+    document.getElementById("gameOverMenu").style.display = "block";
+    document.getElementById("endStatus").innerText = msg;
+    document.getElementById("finalScore").innerText = "Điểm đạt được: " + score;
+}
 
-    player.vy+=gravity;
-    player.y+=player.vy;
+// --- VÒNG LẶP CHÍNH ---
+function update() {
+    if (!gameRunning || asking) return;
 
-    if(player.y>=groundY-player.h){
-        player.y=groundY-player.h;
-        player.jumping=false;
+    // Vật lý nhân vật
+    player.vy += gravity;
+    player.y += player.vy;
+    if (player.y >= groundY - player.h) {
+        player.y = groundY - player.h;
+        player.jumping = false;
+        player.vy = 0;
     }
 
-    bgX-=bgSpeed;
-    if(bgX<=-canvas.width) bgX=0;
+    // Chuyển động nền
+    bgX -= speed;
+    if (bgX <= -canvas.width) bgX = 0;
 
-    if(nextSpawn<=0){
-        let isDouble=Math.random()<0.5;
-
-        obstacles.push({
-            x:canvas.width,
-            y:groundY-60,
-            w:isDouble?100:50,
-            h:60,
-            type:isDouble?2:1
-        });
-
-        nextSpawn=Math.random()*400+300;
+    // Quản lý vật cản
+    nextSpawn -= speed;
+    if (nextSpawn <= 0) {
+        let isDouble = Math.random() > 0.6;
+        obstacles.push({ x: canvas.width, y: groundY - 60, w: isDouble ? 90 : 50, h: 60, type: isDouble?2:1 });
+        nextSpawn = 500 + Math.random() * 500;
     }
 
-    obstacles.forEach(o=>o.x-=7);
-    nextSpawn-=7;
-
-    for(let o of obstacles){
-        if(player.x<o.x+o.w &&
-           player.x+player.w>o.x &&
-           player.y<o.y+o.h &&
-           player.y+player.h>o.y){
-            gameOver();
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+        obstacles[i].x -= speed;
+        // Va chạm an toàn (padding 12px)
+        let p = 12;
+        if (player.x + p < obstacles[i].x + obstacles[i].w - p &&
+            player.x + player.w - p > obstacles[i].x + p &&
+            player.y + p < obstacles[i].y + obstacles[i].h - p &&
+            player.y + player.h - p > obstacles[i].y + p) {
+            endGame("Hãy cẩn thận hơn nhé!");
         }
+        if (obstacles[i].x + obstacles[i].w < 0) obstacles.splice(i, 1);
     }
 
     score++;
-
-    // đổi nền
-    if(score%300===0 && !isFading){
-        bgIndex=(bgIndex+1)%bgImages.length;
-        nextBg=bgImages[bgIndex];
-        isFading=true;
-        fadeAlpha=0;
-        updateGround();
-    }
-
-    if(isFading){
-        fadeAlpha+=0.02;
-        if(fadeAlpha>=1){
-            currentBg=nextBg;
-            isFading=false;
-        }
-    }
-
-    if(score%500===0 && !asking){
-        askQuestion();
-    }
+    if (score % 1000 === 0) currentBgIdx = (currentBgIdx + 1) % bgImages.length;
+    if (score % 700 === 0 && currentIndex < questions.length) askQuestion();
 }
 
-// ===== DRAW =====
-function draw(){
-    ctx.clearRect(0,0,canvas.width,canvas.height);
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    ctx.drawImage(currentBg,bgX,0,canvas.width,canvas.height);
-    ctx.drawImage(currentBg,bgX+canvas.width,0,canvas.width,canvas.height);
-
-    if(isFading && nextBg){
-        ctx.globalAlpha=fadeAlpha;
-        ctx.drawImage(nextBg,bgX,0,canvas.width,canvas.height);
-        ctx.drawImage(nextBg,bgX+canvas.width,0,canvas.width,canvas.height);
-        ctx.globalAlpha=1;
+    // Vẽ Background
+    let img = bgImages[currentBgIdx];
+    if (img.complete) {
+        ctx.drawImage(img, bgX, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, bgX + canvas.width, 0, canvas.width, canvas.height);
     }
 
-    ctx.drawImage(playerImg,player.x,player.y,player.w,player.h);
-
-    obstacles.forEach(o=>{
-        if(o.type===1){
-            ctx.drawImage(spike1Img,o.x,o.y,o.w,o.h);
-        }else{
-            ctx.drawImage(spike2Img,o.x,o.y,o.w,o.h);
-        }
+    // Vẽ Vật cản
+    obstacles.forEach(o => {
+        let sImg = (o.type === 1) ? spike1Img : spike2Img;
+        if (sImg.complete) ctx.drawImage(sImg, o.x, o.y, o.w, o.h);
+        else { ctx.fillStyle = "red"; ctx.fillRect(o.x, o.y, o.w, o.h); }
     });
 
-    ctx.fillStyle="black";
-    ctx.font="24px Arial";
-    ctx.fillText("Score: "+score,20,40);
-    ctx.fillText("❤️".repeat(lives),20,80);
+    // Vẽ Nhân vật
+    if (playerImg.complete) ctx.drawImage(playerImg, player.x, player.y, player.w, player.h);
+    else { ctx.fillStyle = "#27ae60"; ctx.fillRect(player.x, player.y, player.w, player.h); }
+
+    // Giao diện (UI) thông tin
+    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+    ctx.fillRect(15, 15, 240, 130);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 20px Arial";
+    ctx.fillText("Điểm: " + score, 30, 45);
+    ctx.fillText("Mạng: " + "❤️".repeat(lives), 30, 85);
+    ctx.fillStyle = "#f1c40f";
+    ctx.fillText("Đã trả lời: " + currentIndex + "/15", 30, 125);
 }
 
-// ===== LOOP =====
-function loop(){
+function loop() {
     update();
     draw();
     requestAnimationFrame(loop);
 }
+
+// ĐIỀU KHIỂN
+window.addEventListener("keydown", e => { if(e.code === "Space" || e.code === "ArrowUp") jump(); });
+// Chạm màn hình để nhảy trên điện thoại
+canvas.addEventListener("touchstart", e => { 
+    e.preventDefault(); 
+    jump(); 
+}, {passive: false});
+
 loop();
-
-// ===== GAME OVER =====
-function gameOver(){
-    gameRunning=false;
-    document.getElementById("gameOverMenu").style.display="block";
-    document.getElementById("finalScore").innerText="Score: "+score;
-}
-
-// ===== QUIZ =====
-function askQuestion(){
-    asking=true;
-
-    currentQ=questions[currentIndex];
-
-    let box=document.getElementById("questionBox");
-
-    let html=`<p>${currentQ.q}</p>`;
-    currentQ.options.forEach((opt,i)=>{
-        html+=`<button onclick="answer(${i})">${opt}</button><br>`;
-    });
-
-    box.innerHTML=html;
-    box.style.display="block";
-}
-
-function answer(i){
-    asking=false;
-    document.getElementById("questionBox").style.display="none";
-
-    if(i!==currentQ.correct){
-        lives--;
-        if(lives<=0){
-            restart();
-            return;
-        }
-    }
-
-    currentIndex++;
-
-    if(currentIndex>=questions.length){
-        alert("🎉 Bạn đã hoàn thành 15 câu!");
-        restart();
-    }
-}
 </script>
-
 </body>
 </html>
